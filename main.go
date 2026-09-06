@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+
 	"os"
 	"os/signal"
+
+	"github.com/22aryja/geo-word-chain/config"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -17,7 +20,7 @@ func main() {
 		bot.WithDefaultHandler(handler),
 	}
 
-	b, err := bot.New("8873182342:AAFEkUihW2QV4xGAktzViZtRvrIfYKLx_GY", opts...)
+	b, err := bot.New(config.Config("TELEGRAM_API_TOKEN"), opts...)
 	if err != nil {
 		panic(err)
 	}
