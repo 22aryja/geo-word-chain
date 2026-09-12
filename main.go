@@ -2,32 +2,41 @@ package main
 
 import (
 	"context"
+	"log"
+	"os"
+	"os/signal"
 
+	"github.com/22aryja/geo-word-chain/config"
+	"github.com/22aryja/geo-word-chain/handlers"
 	"github.com/22aryja/geo-word-chain/internal/cities"
+	"github.com/22aryja/geo-word-chain/internal/storage"
 	"github.com/go-telegram/bot"
-	"github.com/go-telegram/bot/models"
 )
 
 func main() {
-// 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-// 	defer cancel()
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
 
-// 	opts := []bot.Option{
-// 		bot.WithDefaultHandler(handler),
-// 	}
+	token := config.Config("TELEGRAM_API_TOKEN")
+	if token == "" {
+		log.Fatal("TELEGRAM_API_TOKEN is not set: add it to .env in the repository root")
+	}
 
-// 	b, err := bot.New(config.Config("TELEGRAM_API_TOKEN"), opts...)
-// 	if err != nil {
-// 		panic(err)
-// 	}
+	// The index is read-only once built, so one copy is shared by every game.
+	index, err := cities.New()
+	if err != nil {
+		log.Fatalf("loading cities: %v", err)
+	}
+	log.Printf("loaded %d cities", index.Len())
 
-// 	b.Start(ctx)
-cities.New()
-}
+	h := handlers.New(storage.NewMemory(index))
 
-func handler(ctx context.Context, b *bot.Bot, update *models.Update) {
-	b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID: update.Message.Chat.ID,
-		Text:   update.Message.Text,
-	})
+	b, err := bot.New(token, bot.WithDefaultHandler(h.Move))
+	if err != nil {
+		log.Fatalf("creating bot: %v", err)
+	}
+	h.Register(b)
+
+	log.Println("bot started; press Ctrl+C to stop")
+	b.Start(ctx)
 }
