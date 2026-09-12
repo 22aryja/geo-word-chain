@@ -77,3 +77,9 @@ func (g *Game) pick(letter string) string {
 	}
 	return ""
 }
+
+func (g *Game) Letter() string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.letter
+}

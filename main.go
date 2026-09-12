@@ -36,6 +36,7 @@ func main() {
 		log.Fatalf("creating bot: %v", err)
 	}
 	h.Register(b)
+	handlers.Describe(ctx, b, index.Len())
 
 	log.Println("bot started; press Ctrl+C to stop")
 	b.Start(ctx)
