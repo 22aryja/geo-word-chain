@@ -19,13 +19,19 @@ func Normalize(word string) string {
 	var runes []rune = []rune(sanitized)
 
 	for i := 0; i < len(runes); i++ {
-		if runes[i] == 'ё' {
+		switch runes[i] {
+		case 'ё':
 			runes[i] = 'е'
+		case '-', '\u2010', '\u2011', '\u2012', '\u2013', '\u2014', '\u2212':
+			runes[i] = ' '
 		}
 	}
 
 	return strings.Join(strings.Fields(string(runes)), " ")
+}
 
+func Compact(normalized string) string {
+	return strings.ReplaceAll(normalized, " ", "")
 }
 
 func FirstLetter(word string) string {
@@ -62,7 +68,7 @@ func IsRussianName(s string) bool {
 		switch {
 		case allowed[r]:
 			hasLetter = true
-		case r == ' ' || r == '-':
+		case r == ' ':
 		default:
 			return false
 		}

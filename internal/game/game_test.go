@@ -112,3 +112,26 @@ func TestPlayConcurrent(t *testing.T) {
 		t.Errorf("Score = %d, want 1: only the first Москва may count", got)
 	}
 }
+
+// A city named without its hyphen must be the same city, including for the
+// repeat check.
+func TestPlayIgnoresSeparators(t *testing.T) {
+	g := New(index(t))
+	g.letter = "н"
+
+	m := g.Play("нью йорк")
+	if m.Result != Accepted {
+		t.Fatalf("Result = %v, want accepted", m.Result)
+	}
+	if m.PlayerCity != "Нью-Йорк" {
+		t.Errorf("PlayerCity = %q, want the canonical hyphenated spelling", m.PlayerCity)
+	}
+
+	g2 := New(index(t))
+	g2.letter = "н"
+	g2.Play("Нью-Йорк")
+	g2.letter = "н"
+	if m := g2.Play("ньюйорк"); m.Result != AlreadyUsed {
+		t.Errorf("Result = %v, want already used: same city, different spelling", m.Result)
+	}
+}

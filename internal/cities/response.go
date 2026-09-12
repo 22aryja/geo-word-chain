@@ -13,6 +13,7 @@ const minCities = 1000
 
 type Index struct {
 	all      map[string]string
+	compact  map[string]string
 	byLetter map[string][]string
 }
 
@@ -21,6 +22,7 @@ func New() (*Index, error) {
 
 	index := &Index{
 		all:      make(map[string]string, len(lines)),
+		compact:  make(map[string]string, len(lines)),
 		byLetter: make(map[string][]string),
 	}
 
@@ -41,6 +43,12 @@ func New() (*Index, error) {
 
 		index.all[key] = display
 		index.byLetter[letter] = append(index.byLetter[letter], key)
+
+		if c := Compact(key); c != key {
+			if _, seen := index.compact[c]; !seen {
+				index.compact[c] = key
+			}
+		}
 	}
 
 	if len(index.all) < minCities {
@@ -50,8 +58,25 @@ func New() (*Index, error) {
 }
 
 func (i *Index) Lookup(word string) (display string, ok bool) {
-	display, ok = i.all[Normalize(word)]
-	return display, ok
+	key := Normalize(word)
+	if key == "" {
+		return "", false
+	}
+	if display, ok = i.all[key]; ok {
+		return display, true
+	}
+	if normalized, found := i.compact[Compact(key)]; found {
+		return i.all[normalized], true
+	}
+	return "", false
+}
+
+func (i *Index) Normalized(word string) string {
+	key := Normalize(word)
+	if _, ok := i.all[key]; ok {
+		return key
+	}
+	return i.compact[Compact(key)]
 }
 
 func (i *Index) ByLetter(letter string) []string {

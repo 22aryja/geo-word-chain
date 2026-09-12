@@ -9,7 +9,8 @@ func TestNormalize(t *testing.T) {
 		{"заглавная Ё тоже", "ЁЛКИ", "елки"},
 		{"обрезает края", "  Иркутск  ", "иркутск"},
 		{"схлопывает пробелы", " Нижний  Новгород ", "нижний новгород"},
-		{"дефис сохраняется", "Ростов-на-Дону", "ростов-на-дону"},
+		{"дефис становится пробелом", "Ростов-на-Дону", "ростов на дону"},
+		{"тире тоже", "Нью–Йорк", "нью йорк"},
 		{"только пробелы", "\u00a0", ""},
 	}
 	for _, tt := range tests {
@@ -100,5 +101,37 @@ func TestNew(t *testing.T) {
 	}
 	if len(index.ByLetter("Щ")) == 0 {
 		t.Error(`ByLetter("Щ") is empty; uppercase input should be normalized`)
+	}
+}
+
+func TestLookupSeparators(t *testing.T) {
+	index, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, in := range []string{
+		"Нью-Йорк",
+		"нью йорк",
+		"НЬЮ ЙОРК",
+		"нью-йорк",
+		"ньюйорк",
+		"  нью   йорк  ",
+	} {
+		display, ok := index.Lookup(in)
+		if !ok {
+			t.Errorf("Lookup(%q) found nothing", in)
+			continue
+		}
+		if display != "Нью-Йорк" {
+			t.Errorf("Lookup(%q) = %q, want Нью-Йорк", in, display)
+		}
+	}
+
+	want := index.Normalized("Нью-Йорк")
+	for _, in := range []string{"нью йорк", "ньюйорк", "Нью–Йорк"} {
+		if got := index.Normalized(in); got != want {
+			t.Errorf("Normalized(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
