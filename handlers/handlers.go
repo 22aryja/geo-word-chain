@@ -1,18 +1,18 @@
-// Package handlers adapts Telegram updates to the game. It is the only package
-// that knows about either Telegram or the wording shown to players.
 package handlers
 
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	"github.com/22aryja/geo-word-chain/internal/cities"
 	"github.com/22aryja/geo-word-chain/internal/game"
 	"github.com/22aryja/geo-word-chain/internal/storage"
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 )
 
-const helpText = "Игра «Города»\n\n" +
+const helpText = "Игра «Города».\n\n" +
 	"Называй город — я отвечу городом на его последнюю букву. " +
 	"Буквы ь, ъ и ы пропускаются. Повторяться нельзя.\n"
 
@@ -26,12 +26,8 @@ func New(store storage.Store) *Handler {
 	return &Handler{store: store}
 }
 
-// Register wires the commands and the reply-keyboard buttons onto the bot. The
-// gameplay handler is registered separately as the default, since it answers
-// anything that is not one of these.
 func (h *Handler) Register(b *bot.Bot) {
-	// MatchTypePrefix rather than MatchTypeCommand: in groups Telegram delivers
-	// "/play@YourBot", which the command matcher would not match.
+
 	for pattern, handler := range map[string]bot.HandlerFunc{
 		"/start": h.Play,
 		"/play":  h.Play,
@@ -42,9 +38,6 @@ func (h *Handler) Register(b *bot.Bot) {
 		b.RegisterHandler(bot.HandlerTypeMessageText, pattern, bot.MatchTypePrefix, handler)
 	}
 
-	// Button labels arrive as plain messages, so they need exact-match handlers
-	// of their own. Without these they would reach Move and be judged as city
-	// guesses.
 	for label, handler := range map[string]bot.HandlerFunc{
 		btnPlay:  h.Play,
 		btnScore: h.Score,
@@ -55,7 +48,6 @@ func (h *Handler) Register(b *bot.Bot) {
 	}
 }
 
-// Play starts a new game, discarding any chain already in progress.
 func (h *Handler) Play(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message == nil {
 		return
@@ -64,7 +56,6 @@ func (h *Handler) Play(ctx context.Context, b *bot.Bot, update *models.Update) {
 	h.send(ctx, b, update.Message.Chat.ID, helpText+"\nТвой ход — назови любой город.")
 }
 
-// Stop ends the game in this chat.
 func (h *Handler) Stop(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message == nil {
 		return
@@ -79,7 +70,6 @@ func (h *Handler) Stop(ctx context.Context, b *bot.Bot, update *models.Update) {
 	h.send(ctx, b, chatID, text)
 }
 
-// Score reports the state of the chain without changing it.
 func (h *Handler) Score(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message == nil {
 		return
@@ -94,7 +84,7 @@ func (h *Handler) Score(ctx context.Context, b *bot.Bot, update *models.Update) 
 
 	text := fmt.Sprintf("Счёт: %d.", g.Score())
 	if letter := g.Letter(); letter != "" {
-		text += fmt.Sprintf(" Тебе на «%s».", letter)
+		text += fmt.Sprintf(" Тебе на «%s».", strings.ToUpper(letter))
 	} else {
 		text += " Назови любой город."
 	}
@@ -108,7 +98,6 @@ func (h *Handler) Help(ctx context.Context, b *bot.Bot, update *models.Update) {
 	h.send(ctx, b, update.Message.Chat.ID, helpText)
 }
 
-// Move handles every other message: in a running game it is the player's turn.
 func (h *Handler) Move(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message == nil || update.Message.Text == "" {
 		return
@@ -117,8 +106,7 @@ func (h *Handler) Move(ctx context.Context, b *bot.Bot, update *models.Update) {
 
 	g, ok := h.store.Get(chatID)
 	if !ok {
-		// Staying quiet in groups matters: the bot would otherwise answer every
-		// unrelated message in the room.
+
 		if update.Message.Chat.Type == models.ChatTypePrivate {
 			h.send(ctx, b, chatID, noGameText)
 		}
@@ -133,13 +121,11 @@ func (h *Handler) Move(ctx context.Context, b *bot.Bot, update *models.Update) {
 	}
 }
 
-// render turns a move into the message the player sees. It is the only place
-// player-facing wording lives.
 func render(move game.Move, score int) string {
 	switch move.Result {
 	case game.Accepted:
-		return fmt.Sprintf("%s → %s\n\nТебе на «%s». Счёт: %d",
-			move.PlayerCity, move.BotCity, move.NextLetter, score)
+		return fmt.Sprintf("%s\n%s\n\nТебе на «%s». Счёт: %d",
+			label(move.PlayerCity), label(move.BotCity), strings.ToUpper(move.NextLetter), score)
 
 	case game.UnknownCity:
 		if move.NextLetter == "" {
@@ -149,22 +135,32 @@ func render(move game.Move, score int) string {
 
 	case game.WrongLetter:
 		return fmt.Sprintf("«%s» не подходит — нужен город на «%s».",
-			move.PlayerCity, move.NextLetter)
+			move.PlayerCity.Name, move.NextLetter)
 
 	case game.AlreadyUsed:
 		return fmt.Sprintf("«%s» уже было. Нужен другой город на «%s».",
-			move.PlayerCity, move.NextLetter)
+			move.PlayerCity.Name, move.NextLetter)
 
 	case game.BotLost:
-		return fmt.Sprintf("%s — сдаюсь, у меня нет ответа. Ты победил!\nСчёт: %d.",
-			move.PlayerCity, score)
+		return fmt.Sprintf("%s\n\nСдаюсь, у меня нет ответа. Ты победил!\nСчёт: %d.",
+			label(move.PlayerCity), score)
 
 	default:
 		return "Что-то пошло не так."
 	}
 }
 
-// send always re-attaches the keyboard so the panel stays visible.
+func label(c cities.City) string {
+	switch {
+	case c.Flag() != "" && c.CountryName != "":
+		return fmt.Sprintf("%s %s %s", c.Flag(), c.Name, " ("+c.CountryName+")")
+	case c.Flag() != "":
+		return c.Flag() + " " + c.Name
+	default:
+		return c.Name
+	}
+}
+
 func (h *Handler) send(ctx context.Context, b *bot.Bot, chatID int64, text string) {
 	b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:      chatID,

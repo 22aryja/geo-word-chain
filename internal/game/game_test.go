@@ -23,14 +23,14 @@ func TestPlayFirstMoveChains(t *testing.T) {
 	if m.Result != Accepted {
 		t.Fatalf("Result = %v, want accepted", m.Result)
 	}
-	if m.PlayerCity != "Москва" {
-		t.Errorf("PlayerCity = %q, want canonical spelling", m.PlayerCity)
+	if m.PlayerCity.Name != "Москва" {
+		t.Errorf("PlayerCity = %q, want canonical spelling", m.PlayerCity.Name)
 	}
-	if got := cities.FirstLetter(m.BotCity); got != "а" {
-		t.Errorf("bot answered %q starting with %q, want а", m.BotCity, got)
+	if got := cities.FirstLetter(m.BotCity.Name); got != "а" {
+		t.Errorf("bot answered %q starting with %q, want а", m.BotCity.Name, got)
 	}
-	if m.NextLetter != cities.LastLetter(m.BotCity) {
-		t.Errorf("NextLetter = %q, want last letter of %q", m.NextLetter, m.BotCity)
+	if m.NextLetter != cities.LastLetter(m.BotCity.Name) {
+		t.Errorf("NextLetter = %q, want last letter of %q", m.NextLetter, m.BotCity.Name)
 	}
 	if g.Score() != 1 {
 		t.Errorf("Score = %d, want 1", g.Score())
@@ -76,7 +76,6 @@ func TestPlayBotLost(t *testing.T) {
 	idx := index(t)
 	g := New(idx)
 
-	// Москва ends in "а"; leave the bot nothing to answer with.
 	for _, c := range idx.ByLetter("а") {
 		g.used[c] = true
 	}
@@ -85,16 +84,14 @@ func TestPlayBotLost(t *testing.T) {
 	if m.Result != BotLost {
 		t.Fatalf("Result = %v, want bot lost", m.Result)
 	}
-	if m.PlayerCity != "Москва" {
-		t.Errorf("PlayerCity = %q, want the move to stand", m.PlayerCity)
+	if m.PlayerCity.Name != "Москва" {
+		t.Errorf("PlayerCity = %q, want the move to stand", m.PlayerCity.Name)
 	}
 	if m.NextLetter != "" {
 		t.Errorf("NextLetter = %q, want empty once the game is over", m.NextLetter)
 	}
 }
 
-// The bot dispatches each update in its own goroutine, so Play must tolerate
-// concurrent calls for the same chat. Only one of these can be accepted.
 func TestPlayConcurrent(t *testing.T) {
 	g := New(index(t))
 
@@ -113,8 +110,6 @@ func TestPlayConcurrent(t *testing.T) {
 	}
 }
 
-// A city named without its hyphen must be the same city, including for the
-// repeat check.
 func TestPlayIgnoresSeparators(t *testing.T) {
 	g := New(index(t))
 	g.letter = "н"
@@ -123,8 +118,8 @@ func TestPlayIgnoresSeparators(t *testing.T) {
 	if m.Result != Accepted {
 		t.Fatalf("Result = %v, want accepted", m.Result)
 	}
-	if m.PlayerCity != "Нью-Йорк" {
-		t.Errorf("PlayerCity = %q, want the canonical hyphenated spelling", m.PlayerCity)
+	if m.PlayerCity.Name != "Нью-Йорк" {
+		t.Errorf("PlayerCity = %q, want the canonical hyphenated spelling", m.PlayerCity.Name)
 	}
 
 	g2 := New(index(t))

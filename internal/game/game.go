@@ -31,8 +31,6 @@ func (g *Game) Play(input string) Move {
 		return Move{Result: UnknownCity, NextLetter: g.letter}
 	}
 
-	// Resolve to the index's own key: the player may have typed the name
-	// without its hyphen, and used must be keyed identically either way.
 	name := g.index.Normalized(input)
 	if g.letter != "" && cities.FirstLetter(name) != g.letter {
 		return Move{Result: WrongLetter, PlayerCity: display, NextLetter: g.letter}
@@ -54,7 +52,7 @@ func (g *Game) Play(input string) Move {
 	return Move{
 		Result:     Accepted,
 		PlayerCity: display,
-		BotCity:    g.index.Display(answer),
+		BotCity:    g.index.City(answer),
 		NextLetter: g.letter,
 	}
 }

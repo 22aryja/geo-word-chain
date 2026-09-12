@@ -7,7 +7,6 @@ import (
 	"github.com/22aryja/geo-word-chain/internal/cities"
 )
 
-// Memory must satisfy Store.
 var _ Store = (*Memory)(nil)
 
 func store(t *testing.T) *Memory {
@@ -55,7 +54,6 @@ func TestChatsAreIsolated(t *testing.T) {
 		t.Error("a move in chat 1 changed chat 2")
 	}
 
-	// Restarting one chat must not disturb the other.
 	s.Start(1)
 	if _, ok := s.Get(2); !ok {
 		t.Error("chat 2 lost its game")

@@ -26,9 +26,9 @@ func TestFirstLetter(t *testing.T) {
 	tests := []struct{ in, want string }{
 		{"Тверь", "т"},
 		{"Ростов-на-Дону", "р"},
-		{"!Москва", "м"}, // пропускает не-буквы
-		{"Ыб", "ы"},      // ы в начале НЕ пропускается
-		{"\u00a0", ""},   // регрессия: раньше паниковало
+		{"!Москва", "м"},
+		{"Ыб", "ы"},
+		{"\u00a0", ""},
 	}
 	for _, tt := range tests {
 		if got := FirstLetter(tt.in); got != tt.want {
@@ -39,11 +39,11 @@ func TestFirstLetter(t *testing.T) {
 
 func TestLastLetter(t *testing.T) {
 	tests := []struct{ in, want string }{
-		{"Тверь", "р"},     // ь пропущен
-		{"Чебоксары", "р"}, // ы пропущен
+		{"Тверь", "р"},
+		{"Чебоксары", "р"},
 		{"Иркутск", "к"},
 		{"Ростов-на-Дону", "у"},
-		{"Ростов-", "в"}, // дефис в конце пропущен
+		{"Ростов-", "в"},
 		{"\u00a0", ""},
 	}
 	for _, tt := range tests {
@@ -61,12 +61,12 @@ func TestIsRussianName(t *testing.T) {
 		{"Москва", true},
 		{"Ростов-на-Дону", true},
 		{"Нижний Новгород", true},
-		{"Волосвалі", false}, // украинская і
-		{"Жезқазған", false}, // казахские қ, ғ
-		{"Сма́ртно", false},  // комбинирующее ударение U+0301
-		{"Moscow", false},    // латиница
+		{"Волосвалі", false},
+		{"Жезқазған", false},
+		{"Сма́ртно", false},
+		{"Moscow", false},
 		{"", false},
-		{"---", false}, // нет букв
+		{"---", false},
 	}
 	for _, tt := range tests {
 		if got := IsRussianName(tt.in); got != tt.want {
@@ -84,16 +84,13 @@ func TestNew(t *testing.T) {
 		t.Errorf("Len() = %d, want at least 20000", got)
 	}
 
-	// Messy input proves Lookup normalizes its argument.
-	if display, ok := index.Lookup("  МОСКВА  "); !ok || display != "Москва" {
-		t.Errorf(`Lookup("  МОСКВА  ") = %q, %v; want "Москва", true`, display, ok)
+	if city, ok := index.Lookup("  МОСКВА  "); !ok || city.Name != "Москва" {
+		t.Errorf(`Lookup("  МОСКВА  ") = %q, %v; want "Москва", true`, city.Name, ok)
 	}
 	if _, ok := index.Lookup("Ленинград"); ok {
 		t.Error("Ленинград should have been filtered out as a historic name")
 	}
 
-	// A letter that ends a city name must also start one, or a game can reach
-	// a position with no legal move for either side.
 	for _, name := range []string{"Москва", "Тверь", "Иркутск"} {
 		if last := LastLetter(name); len(index.ByLetter(last)) == 0 {
 			t.Errorf("no cities start with %q (last letter of %q)", last, name)
@@ -118,13 +115,13 @@ func TestLookupSeparators(t *testing.T) {
 		"ньюйорк",
 		"  нью   йорк  ",
 	} {
-		display, ok := index.Lookup(in)
+		city, ok := index.Lookup(in)
 		if !ok {
 			t.Errorf("Lookup(%q) found nothing", in)
 			continue
 		}
-		if display != "Нью-Йорк" {
-			t.Errorf("Lookup(%q) = %q, want Нью-Йорк", in, display)
+		if city.Name != "Нью-Йорк" {
+			t.Errorf("Lookup(%q) = %q, want Нью-Йорк", in, city)
 		}
 	}
 
@@ -132,6 +129,47 @@ func TestLookupSeparators(t *testing.T) {
 	for _, in := range []string{"нью йорк", "ньюйорк", "Нью–Йорк"} {
 		if got := index.Normalized(in); got != want {
 			t.Errorf("Normalized(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestCityCountry(t *testing.T) {
+	index, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := index.Countries(); got < 200 {
+		t.Errorf("Countries() = %d, want the full ISO list", got)
+	}
+
+	tests := []struct{ name, iso, country, flag string }{
+		{"Москва", "RU", "Россия", "🇷🇺"},
+		{"Нью-Йорк", "US", "США", "🇺🇸"},
+		{"Париж", "FR", "Франция", "🇫🇷"},
+		{"Алматы", "KZ", "Казахстан", "🇰🇿"},
+	}
+	for _, tt := range tests {
+		city, ok := index.Lookup(tt.name)
+		if !ok {
+			t.Errorf("Lookup(%q) found nothing", tt.name)
+			continue
+		}
+		if city.Country != tt.iso {
+			t.Errorf("%s: Country = %q, want %q", tt.name, city.Country, tt.iso)
+		}
+		if city.CountryName != tt.country {
+			t.Errorf("%s: CountryName = %q, want %q", tt.name, city.CountryName, tt.country)
+		}
+		if city.Flag() != tt.flag {
+			t.Errorf("%s: Flag() = %q, want %q", tt.name, city.Flag(), tt.flag)
+		}
+	}
+}
+
+func TestFlagFallsBack(t *testing.T) {
+	for _, c := range []City{{Country: ""}, {Country: "X"}, {Country: "usa"}, {Country: "u1"}} {
+		if got := c.Flag(); got != "" {
+			t.Errorf("City{Country:%q}.Flag() = %q, want empty", c.Country, got)
 		}
 	}
 }

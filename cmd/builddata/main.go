@@ -1,14 +1,3 @@
-// Command builddata turns the raw GeoNames dumps into the compact city list
-// that the bot embeds.
-//
-// It is run by hand, not by the bot. Download the two dumps from
-// https://download.geonames.org/export/dump/ and run:
-//
-//	go run ./cmd/builddata -alt ~/Downloads/alternateNamesV2.txt -cities ~/Downloads/cities5000.txt
-//
-// The generated file is committed to the repository; the bot never reads the
-// dumps. Filtering and deduplication go through internal/cities so that the
-// generated list and the bot's runtime lookups can never disagree.
 package main
 
 import (
@@ -24,88 +13,114 @@ import (
 	"github.com/22aryja/geo-word-chain/internal/cities"
 )
 
-// Column indices in the GeoNames dumps, both tab-separated and documented at
-// https://download.geonames.org/export/dump/readme.txt
 const (
-	// cities5000.txt
 	cityID         = 0
 	cityCountry    = 8
 	cityPopulation = 14
 	cityColumns    = 19
 
-	// alternateNamesV2.txt
 	altGeonameID    = 1
 	altISOLanguage  = 2
 	altName         = 3
 	altIsPreferred  = 4
 	altIsColloquial = 6
 	altIsHistoric   = 7
-	altColumns      = 8 // trailing "from"/"to" columns are often absent
+	altColumns      = 8
+
+	countryISO       = 0
+	countryGeonameID = 16
+	countryColumns   = 17
 )
 
 type place struct {
-	display string
-	country string
+	display    string
+	country    string
+	population int
+}
+
+type meta struct {
+	country    string
+	population int
 }
 
 func main() {
 	var (
-		altPath   = flag.String("alt", "", "path to alternateNamesV2.txt (required)")
-		cityPath  = flag.String("cities", "", "path to cities5000.txt (required)")
-		outPath   = flag.String("out", filepath.Join("internal", "cities", "data", "cities_ru.txt"), "generated city list")
-		lang      = flag.String("lang", "ru", "isolanguage code to extract")
-		country   = flag.String("country", "", "restrict to one ISO country code (empty means worldwide)")
-		minPop    = flag.Int("min-pop", 0, "skip cities below this population")
-		histogram = flag.Bool("histogram", true, "report cities per starting/ending letter")
+		altPath     = flag.String("alt", "", "path to alternateNamesV2.txt (required)")
+		cityPath    = flag.String("cities", "", "path to cities5000.txt (required)")
+		countryPath = flag.String("countries", "", "path to countryInfo.txt (required)")
+		outDir      = flag.String("out", filepath.Join("internal", "cities", "data"), "directory for the generated lists")
+		lang        = flag.String("lang", "ru", "isolanguage code to extract")
+		country     = flag.String("country", "", "restrict to one ISO country code (empty means worldwide)")
+		minPop      = flag.Int("min-pop", 0, "skip cities below this population")
+		histogram   = flag.Bool("histogram", true, "report cities per starting/ending letter")
 	)
 	flag.Parse()
 
-	if *altPath == "" || *cityPath == "" {
-		fmt.Fprintln(os.Stderr, "builddata: -alt and -cities are required")
+	if *altPath == "" || *cityPath == "" || *countryPath == "" {
+		fmt.Fprintln(os.Stderr, "builddata: -alt, -cities and -countries are required")
 		flag.Usage()
 		os.Exit(2)
 	}
 
-	// Pass 1 reads the small file first so that pass 2 can discard the vast
-	// majority of the 783MB dump without allocating for it: only ~70k
-	// geonameids are populated places we care about.
-	wanted, err := readCities(*cityPath, *country, *minPop)
-	if err != nil {
+	if err := run(*altPath, *cityPath, *countryPath, *outDir, *lang, *country, *minPop, *histogram); err != nil {
 		fmt.Fprintln(os.Stderr, "builddata:", err)
 		os.Exit(1)
 	}
-	fmt.Printf("cities5000: %d places match the country/population filter\n", len(wanted))
+}
 
-	named, err := readNames(*altPath, *lang, wanted)
+func run(altPath, cityPath, countryPath, outDir, lang, country string, minPop int, histogram bool) error {
+
+	wantedCities, err := readCities(cityPath, country, minPop)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "builddata:", err)
-		os.Exit(1)
+		return err
 	}
-	fmt.Printf("alternate names: %d of them have a usable %q name\n", len(named), *lang)
+	fmt.Printf("cities5000: %d places match the country/population filter\n", len(wantedCities))
+
+	wantedCountries, err := readCountries(countryPath)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("countryInfo: %d countries\n", len(wantedCountries))
+
+	named, countryNames, err := readNames(altPath, lang, wantedCities, wantedCountries)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("alternate names: %d cities and %d countries have a %q name\n",
+		len(named), len(countryNames), lang)
 
 	list, dropped := dedupe(named)
 	fmt.Printf("after dedupe by normalized form: %d unique cities (%d duplicates collapsed)\n", len(list), dropped)
 
-	if err := write(*outPath, list); err != nil {
-		fmt.Fprintln(os.Stderr, "builddata:", err)
-		os.Exit(1)
+	cityFile := filepath.Join(outDir, "cities_"+lang+".txt")
+	if err := writeCities(cityFile, list); err != nil {
+		return err
 	}
-	fmt.Printf("wrote %s\n", *outPath)
+	fmt.Printf("wrote %s\n", cityFile)
 
-	if *histogram {
+	countryFile := filepath.Join(outDir, "countries_"+lang+".txt")
+	if err := writeCountries(countryFile, countryNames); err != nil {
+		return err
+	}
+	fmt.Printf("wrote %s\n", countryFile)
+
+	if missing := missingCountries(list, countryNames); len(missing) > 0 {
+		fmt.Printf("\nwarning: %d country codes have no %q name: %v\n", len(missing), lang, missing)
+	}
+	if histogram {
 		reportLetters(list)
 	}
+	return nil
 }
 
-// readCities returns the geonameids of populated places passing the filters.
-func readCities(path, country string, minPop int) (map[string]string, error) {
+func readCities(path, country string, minPop int) (map[string]meta, error) {
 	f, sc, err := open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 
-	out := make(map[string]string)
+	out := make(map[string]meta)
 	for sc.Scan() {
 		c := strings.Split(sc.Text(), "\t")
 		if len(c) < cityColumns {
@@ -114,93 +129,134 @@ func readCities(path, country string, minPop int) (map[string]string, error) {
 		if country != "" && c[cityCountry] != country {
 			continue
 		}
-		if minPop > 0 {
-			pop, err := strconv.Atoi(c[cityPopulation])
-			if err != nil || pop < minPop {
-				continue
-			}
+
+		pop, err := strconv.Atoi(c[cityPopulation])
+		if err != nil {
+			pop = 0
 		}
-		out[c[cityID]] = c[cityCountry]
+		if pop < minPop {
+			continue
+		}
+		out[c[cityID]] = meta{country: c[cityCountry], population: pop}
 	}
 	return out, sc.Err()
 }
 
-// readNames streams the large dump and keeps one name per wanted geonameid.
-func readNames(path, lang string, wanted map[string]string) (map[string]place, error) {
+func readCountries(path string) (map[string]string, error) {
 	f, sc, err := open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 
-	out := make(map[string]place, len(wanted))
-	preferred := make(map[string]bool, len(wanted))
-
+	out := make(map[string]string)
 	for sc.Scan() {
-		c := strings.Split(sc.Text(), "\t")
-		if len(c) < altColumns {
+		line := sc.Text()
+		if strings.HasPrefix(line, "#") {
 			continue
 		}
-		if c[altISOLanguage] != lang {
+		c := strings.Split(line, "\t")
+		if len(c) < countryColumns || c[countryGeonameID] == "" {
 			continue
 		}
-		// Historic names (Ленинград, Молотов) and colloquial ones (Питер, СПб)
-		// are real answers to a different question than the one the game asks.
-		if c[altIsHistoric] == "1" || c[altIsColloquial] == "1" {
-			continue
-		}
-		id := c[altGeonameID]
-		cc, ok := wanted[id]
-		if !ok {
-			continue
-		}
-		// GeoNames labels some Ukrainian, Kazakh and Serbian names as "ru".
-		// This is the filter that removes them, and it is the same predicate
-		// the bot uses at runtime.
-		name := strings.TrimSpace(c[altName])
-		if !cities.IsRussianName(name) {
-			continue
-		}
-		// A city with no chainable last letter would dead-end the game.
-		if cities.LastLetter(name) == "" {
-			continue
-		}
-
-		isPref := c[altIsPreferred] == "1"
-		if _, seen := out[id]; !seen || (isPref && !preferred[id]) {
-			out[id] = place{display: name, country: cc}
-			preferred[id] = isPref
-		}
+		out[c[countryGeonameID]] = c[countryISO]
 	}
 	return out, sc.Err()
 }
 
-// dedupe collapses places whose names normalize to the same key. Homonyms are
-// common (many settlements are called Александровка) and the game only ever
-// compares the string, so one entry per spelling is enough.
-func dedupe(named map[string]place) ([]string, int) {
-	byKey := make(map[string]string, len(named))
+func readNames(path, lang string, cityIDs map[string]meta, countryIDs map[string]string) (map[string]place, map[string]string, error) {
+	f, sc, err := open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer f.Close()
+
+	named := make(map[string]place, len(cityIDs))
+	countryNames := make(map[string]string, len(countryIDs))
+	preferredCity := make(map[string]bool, len(cityIDs))
+	preferredCountry := make(map[string]bool, len(countryIDs))
+
+	for sc.Scan() {
+		c := strings.Split(sc.Text(), "\t")
+		if len(c) < altColumns || c[altISOLanguage] != lang {
+			continue
+		}
+
+		if c[altIsHistoric] == "1" || c[altIsColloquial] == "1" {
+			continue
+		}
+
+		id := c[altGeonameID]
+		name := strings.TrimSpace(c[altName])
+		isPreferred := c[altIsPreferred] == "1"
+
+		if iso, ok := countryIDs[id]; ok {
+
+			if _, seen := countryNames[iso]; !seen || (isPreferred && !preferredCountry[iso]) {
+				countryNames[iso] = name
+				preferredCountry[iso] = isPreferred
+			}
+			continue
+		}
+
+		m, ok := cityIDs[id]
+		if !ok {
+			continue
+		}
+
+		if !cities.IsRussianName(name) {
+			continue
+		}
+
+		if cities.LastLetter(name) == "" {
+			continue
+		}
+		if _, seen := named[id]; !seen || (isPreferred && !preferredCity[id]) {
+			named[id] = place{display: name, country: m.country, population: m.population}
+			preferredCity[id] = isPreferred
+		}
+	}
+	return named, countryNames, sc.Err()
+}
+
+func dedupe(named map[string]place) ([]place, int) {
+	byKey := make(map[string]place, len(named))
 	for _, p := range named {
 		key := cities.Normalize(p.display)
-		// Map iteration is randomized, so pick deterministically rather than
-		// letting whichever entry arrives last win.
-		if prev, ok := byKey[key]; ok {
-			if prev <= p.display {
-				continue
-			}
+
+		if prev, ok := byKey[key]; ok && !better(p, prev) {
+			continue
 		}
-		byKey[key] = p.display
+		byKey[key] = p
 	}
 
-	list := make([]string, 0, len(byKey))
-	for _, display := range byKey {
-		list = append(list, display)
+	list := make([]place, 0, len(byKey))
+	for _, p := range byKey {
+		list = append(list, p)
 	}
-	sort.Strings(list)
+	sort.Slice(list, func(i, j int) bool { return list[i].display < list[j].display })
 	return list, len(named) - len(byKey)
 }
 
-func write(path string, list []string) error {
+func writeCities(path string, list []place) error {
+	return writeLines(path, len(list), func(i int) string {
+		return list[i].display + "\t" + list[i].country
+	})
+}
+
+func writeCountries(path string, names map[string]string) error {
+	isos := make([]string, 0, len(names))
+	for iso := range names {
+		isos = append(isos, iso)
+	}
+	sort.Strings(isos)
+
+	return writeLines(path, len(isos), func(i int) string {
+		return isos[i] + "\t" + names[isos[i]]
+	})
+}
+
+func writeLines(path string, n int, line func(int) string) error {
 	if dir := filepath.Dir(path); dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
@@ -213,23 +269,35 @@ func write(path string, list []string) error {
 	defer f.Close()
 
 	w := bufio.NewWriter(f)
-	for _, name := range list {
-		if _, err := fmt.Fprintln(w, name); err != nil {
+	for i := range n {
+		if _, err := fmt.Fprintln(w, line(i)); err != nil {
 			return err
 		}
 	}
 	return w.Flush()
 }
 
-// reportLetters prints how many cities start and end with each letter. A letter
-// that ends words but starts none is a dead end: reaching it makes the next
-// move impossible for either player.
-func reportLetters(list []string) {
+func missingCountries(list []place, names map[string]string) []string {
+	missing := map[string]bool{}
+	for _, p := range list {
+		if _, ok := names[p.country]; !ok {
+			missing[p.country] = true
+		}
+	}
+	out := make([]string, 0, len(missing))
+	for iso := range missing {
+		out = append(out, iso)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func reportLetters(list []place) {
 	first := make(map[string]int)
 	last := make(map[string]int)
-	for _, name := range list {
-		first[cities.FirstLetter(name)]++
-		last[cities.LastLetter(name)]++
+	for _, p := range list {
+		first[cities.FirstLetter(p.display)]++
+		last[cities.LastLetter(p.display)]++
 	}
 
 	letters := make([]string, 0, len(first))
@@ -263,8 +331,17 @@ func open(path string) (*os.File, *bufio.Scanner, error) {
 		return nil, nil, err
 	}
 	sc := bufio.NewScanner(f)
-	// The alternatenames column in cities5000.txt runs well past the 64KB
-	// default token size.
+
 	sc.Buffer(make([]byte, 1024*1024), 1024*1024)
 	return f, sc, nil
+}
+
+func better(a, b place) bool {
+	if a.population != b.population {
+		return a.population > b.population
+	}
+	if a.display != b.display {
+		return a.display < b.display
+	}
+	return a.country < b.country
 }

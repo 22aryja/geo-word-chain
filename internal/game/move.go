@@ -1,5 +1,7 @@
 package game
 
+import "github.com/22aryja/geo-word-chain/internal/cities"
+
 type Result int
 
 const (
@@ -30,7 +32,7 @@ func (r Result) String() string {
 
 type Move struct {
 	Result     Result
-	PlayerCity string
-	BotCity    string
+	PlayerCity cities.City
+	BotCity    cities.City
 	NextLetter string
 }

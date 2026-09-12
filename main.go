@@ -22,7 +22,6 @@ func main() {
 		log.Fatal("TELEGRAM_API_TOKEN is not set: add it to .env in the repository root")
 	}
 
-	// The index is read-only once built, so one copy is shared by every game.
 	index, err := cities.New()
 	if err != nil {
 		log.Fatalf("loading cities: %v", err)
