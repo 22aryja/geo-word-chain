@@ -75,3 +75,89 @@ func TestCallbackDataFitsTelegramLimit(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderIncludesFact(t *testing.T) {
+	got := render(game.Move{
+		Result:     game.Accepted,
+		PlayerCity: cities.City{Name: "Санкт-Петербург", Country: "RU", CountryName: "Россия"},
+		BotCity: cities.City{
+			Name:        "Гамбург",
+			Country:     "DE",
+			CountryName: "Германия",
+			Fact:        "Гамбург — город на севере Германии.",
+		},
+		NextLetter: "г",
+	}, 1)
+
+	if !strings.Contains(got, "Гамбург — город на севере Германии.") {
+		t.Errorf("fact missing from output:\n%s", got)
+	}
+	t.Logf("with fact:\n%s", got)
+}
+
+func TestRenderWithoutFact(t *testing.T) {
+	got := render(game.Move{
+		Result:     game.Accepted,
+		PlayerCity: cities.City{Name: "Москва", Country: "RU", CountryName: "Россия"},
+		BotCity:    cities.City{Name: "Абаза", Country: "RU", CountryName: "Россия"},
+		NextLetter: "а",
+	}, 1)
+
+	if strings.Contains(got, "\n\n\n") {
+		t.Errorf("blank line left where the fact would be:\n%q", got)
+	}
+	t.Logf("without fact:\n%s", got)
+}
+
+func TestRenderFactIsBlockquote(t *testing.T) {
+	got := render(game.Move{
+		Result:     game.Accepted,
+		PlayerCity: cities.City{Name: "Астана", Country: "KZ", CountryName: "Казахстан"},
+		BotCity: cities.City{
+			Name:        "Абуджа",
+			Country:     "NG",
+			CountryName: "Нигерия",
+			Fact:        "Абуджа — столица Нигерии с 12 декабря 1991 года.",
+		},
+		NextLetter: "а",
+	}, 3)
+
+	if !strings.Contains(got, "<blockquote>Абуджа — столица Нигерии с 12 декабря 1991 года.</blockquote>") {
+		t.Errorf("fact is not wrapped in a blockquote:\n%s", got)
+	}
+	if strings.Count(got, "<blockquote>") != strings.Count(got, "</blockquote>") {
+		t.Errorf("unbalanced blockquote tags:\n%s", got)
+	}
+	t.Logf("%s", got)
+}
+
+func TestRenderEscapesHTML(t *testing.T) {
+	got := render(game.Move{
+		Result:     game.Accepted,
+		PlayerCity: cities.City{Name: "A<b>&", Country: "RU", CountryName: "Рос&сия"},
+		BotCity:    cities.City{Name: "X>Y", Country: "RU", CountryName: "Россия", Fact: "5 < 6 & 7 > 2"},
+		NextLetter: "а",
+	}, 1)
+
+	for _, raw := range []string{"A<b>", "5 < 6", "7 > 2", "Рос&сия"} {
+		if strings.Contains(got, raw) {
+			t.Errorf("unescaped %q would break HTML parse mode:\n%s", raw, got)
+		}
+	}
+	if !strings.Contains(got, "&lt;") || !strings.Contains(got, "&amp;") {
+		t.Errorf("expected escaped entities:\n%s", got)
+	}
+}
+
+func TestRenderRejectionsEscape(t *testing.T) {
+	for _, result := range []game.Result{game.WrongLetter, game.AlreadyUsed} {
+		got := render(game.Move{
+			Result:     result,
+			PlayerCity: cities.City{Name: "<script>"},
+			NextLetter: "а",
+		}, 0)
+		if strings.Contains(got, "<script>") {
+			t.Errorf("%v leaves raw HTML:\n%s", result, got)
+		}
+	}
+}

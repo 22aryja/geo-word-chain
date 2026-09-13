@@ -14,6 +14,9 @@ var raw string
 //go:embed data/countries_ru.txt
 var rawCountries string
 
+//go:embed data/facts_ru.txt
+var rawFacts string
+
 const minCities = 1000
 
 type City struct {
@@ -21,6 +24,7 @@ type City struct {
 	Country     string
 	CountryName string
 	Population  int
+	Fact        string
 }
 
 func (c City) Flag() string {
@@ -46,6 +50,7 @@ type Index struct {
 
 func New() (*Index, error) {
 	countries := parseCountries(rawCountries)
+	facts := parseFacts(rawFacts)
 	lines := strings.Split(raw, "\n")
 
 	index := &Index{
@@ -84,6 +89,7 @@ func New() (*Index, error) {
 			Country:     iso,
 			CountryName: countries[iso],
 			Population:  population,
+			Fact:        facts[key],
 		}
 		index.byLetter[letter] = append(index.byLetter[letter], key)
 
@@ -173,4 +179,28 @@ func (i *Index) LetterCounts() map[string]int {
 		out[letter] = len(bucket)
 	}
 	return out
+}
+
+func parseFacts(raw string) map[string]string {
+	out := make(map[string]string)
+	for _, line := range strings.Split(raw, "\n") {
+		name, fact, ok := strings.Cut(strings.TrimSpace(line), "\t")
+		if !ok {
+			continue
+		}
+		if key := Normalize(name); key != "" {
+			out[key] = strings.TrimSpace(fact)
+		}
+	}
+	return out
+}
+
+func (i *Index) Facts() int {
+	n := 0
+	for _, c := range i.all {
+		if c.Fact != "" {
+			n++
+		}
+	}
+	return n
 }

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"html"
 	"strings"
 
 	"github.com/22aryja/geo-word-chain/internal/cities"
@@ -118,8 +119,9 @@ func (h *Handler) Move(ctx context.Context, b *bot.Bot, update *models.Update) {
 func render(move game.Move, score int) string {
 	switch move.Result {
 	case game.Accepted:
-		return fmt.Sprintf("%s\n%s\n\nТебе на «%s». Счёт: %d",
-			label(move.PlayerCity), label(move.BotCity), strings.ToUpper(move.NextLetter), score)
+		return fmt.Sprintf("%s\n%s%s\n\nТебе на «%s». Счёт: %d",
+			label(move.PlayerCity), label(move.BotCity), fact(move.BotCity),
+			strings.ToUpper(move.NextLetter), score)
 
 	case game.UnknownCity:
 		if move.NextLetter == "" {
@@ -129,11 +131,11 @@ func render(move game.Move, score int) string {
 
 	case game.WrongLetter:
 		return fmt.Sprintf("«%s» не подходит — нужен город на «%s».",
-			move.PlayerCity.Name, move.NextLetter)
+			html.EscapeString(move.PlayerCity.Name), move.NextLetter)
 
 	case game.AlreadyUsed:
 		return fmt.Sprintf("«%s» уже было. Нужен другой город на «%s».",
-			move.PlayerCity.Name, move.NextLetter)
+			html.EscapeString(move.PlayerCity.Name), move.NextLetter)
 
 	case game.BotLost:
 		return fmt.Sprintf("%s\n\nСдаюсь, у меня нет ответа. Ты победил!\nСчёт: %d.",
@@ -145,13 +147,14 @@ func render(move game.Move, score int) string {
 }
 
 func label(c cities.City) string {
+	name := html.EscapeString(c.Name)
 	switch {
 	case c.Flag() != "" && c.CountryName != "":
-		return fmt.Sprintf("%s %s %s", c.Flag(), c.Name, " ("+c.CountryName+")")
+		return fmt.Sprintf("%s %s %s", c.Flag(), name, " ("+html.EscapeString(c.CountryName)+")")
 	case c.Flag() != "":
-		return c.Flag() + " " + c.Name
+		return c.Flag() + " " + name
 	default:
-		return c.Name
+		return name
 	}
 }
 
@@ -159,6 +162,14 @@ func (h *Handler) send(ctx context.Context, b *bot.Bot, chatID int64, text strin
 	b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:      chatID,
 		Text:        text,
+		ParseMode:   models.ParseModeHTML,
 		ReplyMarkup: mainKeyboard,
 	})
+}
+
+func fact(c cities.City) string {
+	if c.Fact == "" {
+		return ""
+	}
+	return "\n<blockquote>" + html.EscapeString(c.Fact) + "</blockquote>"
 }

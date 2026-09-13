@@ -33,6 +33,7 @@ const (
 )
 
 type place struct {
+	id         string
 	display    string
 	country    string
 	population int
@@ -53,6 +54,8 @@ func main() {
 		country     = flag.String("country", "", "restrict to one ISO country code (empty means worldwide)")
 		minPop      = flag.Int("min-pop", 0, "skip cities below this population")
 		histogram   = flag.Bool("histogram", true, "report cities per starting/ending letter")
+		facts       = flag.Bool("facts", false, "fetch Wikipedia summaries for cities that have an article")
+		factsLimit  = flag.Int("facts-limit", 5000, "how many of the most populous cities get a summary")
 	)
 	flag.Parse()
 
@@ -62,13 +65,13 @@ func main() {
 		os.Exit(2)
 	}
 
-	if err := run(*altPath, *cityPath, *countryPath, *outDir, *lang, *country, *minPop, *histogram); err != nil {
+	if err := run(*altPath, *cityPath, *countryPath, *outDir, *lang, *country, *minPop, *histogram, *facts, *factsLimit); err != nil {
 		fmt.Fprintln(os.Stderr, "builddata:", err)
 		os.Exit(1)
 	}
 }
 
-func run(altPath, cityPath, countryPath, outDir, lang, country string, minPop int, histogram bool) error {
+func run(altPath, cityPath, countryPath, outDir, lang, country string, minPop int, histogram, facts bool, factsLimit int) error {
 
 	wantedCities, err := readCities(cityPath, country, minPop)
 	if err != nil {
@@ -82,7 +85,7 @@ func run(altPath, cityPath, countryPath, outDir, lang, country string, minPop in
 	}
 	fmt.Printf("countryInfo: %d countries\n", len(wantedCountries))
 
-	named, countryNames, err := readNames(altPath, lang, wantedCities, wantedCountries)
+	named, countryNames, links, notable, err := readNames(altPath, lang, wantedCities, wantedCountries)
 	if err != nil {
 		return err
 	}
@@ -103,6 +106,15 @@ func run(altPath, cityPath, countryPath, outDir, lang, country string, minPop in
 		return err
 	}
 	fmt.Printf("wrote %s\n", countryFile)
+
+	if facts {
+		fetched := fetchFacts(list, links, notable, lang, factsLimit)
+		factFile := filepath.Join(outDir, "facts_"+lang+".txt")
+		if err := writeFacts(factFile, fetched, list); err != nil {
+			return err
+		}
+		fmt.Printf("wrote %s (%d facts)\n", factFile, len(fetched))
+	}
 
 	if missing := missingCountries(list, countryNames); len(missing) > 0 {
 		fmt.Printf("\nwarning: %d country codes have no %q name: %v\n", len(missing), lang, missing)
@@ -164,13 +176,15 @@ func readCountries(path string) (map[string]string, error) {
 	return out, sc.Err()
 }
 
-func readNames(path, lang string, cityIDs map[string]meta, countryIDs map[string]string) (map[string]place, map[string]string, error) {
+func readNames(path, lang string, cityIDs map[string]meta, countryIDs map[string]string) (map[string]place, map[string]string, map[string]string, map[string]bool, error) {
 	f, sc, err := open(path)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	defer f.Close()
 
+	links := make(map[string]string)
+	notable := make(map[string]bool)
 	named := make(map[string]place, len(cityIDs))
 	countryNames := make(map[string]string, len(countryIDs))
 	preferredCity := make(map[string]bool, len(cityIDs))
@@ -178,7 +192,19 @@ func readNames(path, lang string, cityIDs map[string]meta, countryIDs map[string
 
 	for sc.Scan() {
 		c := strings.Split(sc.Text(), "\t")
-		if len(c) < altColumns || c[altISOLanguage] != lang {
+		if len(c) < altColumns {
+			continue
+		}
+		if c[altISOLanguage] == "link" {
+			if _, ok := cityIDs[c[altGeonameID]]; ok && strings.Contains(c[altName], "wikipedia.org") {
+				notable[c[altGeonameID]] = true
+				if strings.Contains(c[altName], lang+".wikipedia.org") {
+					links[c[altGeonameID]] = c[altName]
+				}
+			}
+			continue
+		}
+		if c[altISOLanguage] != lang {
 			continue
 		}
 
@@ -212,11 +238,11 @@ func readNames(path, lang string, cityIDs map[string]meta, countryIDs map[string
 			continue
 		}
 		if _, seen := named[id]; !seen || (isPreferred && !preferredCity[id]) {
-			named[id] = place{display: name, country: m.country, population: m.population}
+			named[id] = place{id: id, display: name, country: m.country, population: m.population}
 			preferredCity[id] = isPreferred
 		}
 	}
-	return named, countryNames, sc.Err()
+	return named, countryNames, links, notable, sc.Err()
 }
 
 func dedupe(named map[string]place) ([]place, int) {
