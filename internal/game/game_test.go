@@ -17,7 +17,7 @@ func index(t *testing.T) *cities.Index {
 }
 
 func TestPlayFirstMoveChains(t *testing.T) {
-	g := New(index(t))
+	g := New(index(t), AI)
 
 	m := g.Play("  МОСКВА  ")
 	if m.Result != Accepted {
@@ -41,7 +41,7 @@ func TestPlayRejections(t *testing.T) {
 	idx := index(t)
 
 	t.Run("unknown city", func(t *testing.T) {
-		g := New(idx)
+		g := New(idx, AI)
 		if m := g.Play("Йцукенгшщз"); m.Result != UnknownCity {
 			t.Errorf("Result = %v, want unknown city", m.Result)
 		}
@@ -51,7 +51,7 @@ func TestPlayRejections(t *testing.T) {
 	})
 
 	t.Run("wrong letter", func(t *testing.T) {
-		g := New(idx)
+		g := New(idx, AI)
 		g.letter = "щ"
 		m := g.Play("Москва")
 		if m.Result != WrongLetter {
@@ -63,7 +63,7 @@ func TestPlayRejections(t *testing.T) {
 	})
 
 	t.Run("already used", func(t *testing.T) {
-		g := New(idx)
+		g := New(idx, AI)
 		g.used["москва"] = true
 		g.letter = "м"
 		if m := g.Play("Москва"); m.Result != AlreadyUsed {
@@ -74,7 +74,7 @@ func TestPlayRejections(t *testing.T) {
 
 func TestPlayBotLost(t *testing.T) {
 	idx := index(t)
-	g := New(idx)
+	g := New(idx, AI)
 
 	for _, c := range idx.ByLetter("а") {
 		g.used[c] = true
@@ -93,7 +93,7 @@ func TestPlayBotLost(t *testing.T) {
 }
 
 func TestPlayConcurrent(t *testing.T) {
-	g := New(index(t))
+	g := New(index(t), AI)
 
 	var wg sync.WaitGroup
 	for range 50 {
@@ -111,7 +111,7 @@ func TestPlayConcurrent(t *testing.T) {
 }
 
 func TestPlayIgnoresSeparators(t *testing.T) {
-	g := New(index(t))
+	g := New(index(t), AI)
 	g.letter = "н"
 
 	m := g.Play("нью йорк")
@@ -122,7 +122,7 @@ func TestPlayIgnoresSeparators(t *testing.T) {
 		t.Errorf("PlayerCity = %q, want the canonical hyphenated spelling", m.PlayerCity.Name)
 	}
 
-	g2 := New(index(t))
+	g2 := New(index(t), AI)
 	g2.letter = "н"
 	g2.Play("Нью-Йорк")
 	g2.letter = "н"

@@ -121,7 +121,7 @@ func TestLookupSeparators(t *testing.T) {
 			continue
 		}
 		if city.Name != "Нью-Йорк" {
-			t.Errorf("Lookup(%q) = %q, want Нью-Йорк", in, city)
+			t.Errorf("Lookup(%q) = %q, want Нью-Йорк", in, city.Name)
 		}
 	}
 

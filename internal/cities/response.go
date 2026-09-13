@@ -3,6 +3,8 @@ package cities
 import (
 	_ "embed"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -18,6 +20,7 @@ type City struct {
 	Name        string
 	Country     string
 	CountryName string
+	Population  int
 }
 
 func (c City) Flag() string {
@@ -53,12 +56,19 @@ func New() (*Index, error) {
 	}
 
 	for _, line := range lines {
-		display, iso, _ := strings.Cut(strings.TrimSpace(line), "\t")
-		display = strings.TrimSpace(display)
+		fields := strings.Split(strings.TrimSpace(line), "\t")
+		display := strings.TrimSpace(fields[0])
 		if display == "" {
 			continue
 		}
-		iso = strings.TrimSpace(iso)
+		var iso string
+		var population int
+		if len(fields) > 1 {
+			iso = strings.TrimSpace(fields[1])
+		}
+		if len(fields) > 2 {
+			population, _ = strconv.Atoi(strings.TrimSpace(fields[2]))
+		}
 
 		key := Normalize(display)
 		letter := FirstLetter(key)
@@ -73,6 +83,7 @@ func New() (*Index, error) {
 			Name:        display,
 			Country:     iso,
 			CountryName: countries[iso],
+			Population:  population,
 		}
 		index.byLetter[letter] = append(index.byLetter[letter], key)
 
@@ -82,6 +93,8 @@ func New() (*Index, error) {
 			}
 		}
 	}
+
+	index.sortByFame()
 
 	if len(index.all) < minCities {
 		return nil, fmt.Errorf("cities: loaded %d names, expected at least %d", len(index.all), minCities)
@@ -139,4 +152,25 @@ func (i *Index) Len() int {
 
 func (i *Index) Countries() int {
 	return len(i.countries)
+}
+
+func (i *Index) sortByFame() {
+	for letter, bucket := range i.byLetter {
+		sort.SliceStable(bucket, func(a, b int) bool {
+			pa, pb := i.all[bucket[a]].Population, i.all[bucket[b]].Population
+			if pa != pb {
+				return pa > pb
+			}
+			return bucket[a] < bucket[b]
+		})
+		i.byLetter[letter] = bucket
+	}
+}
+
+func (i *Index) LetterCounts() map[string]int {
+	out := make(map[string]int, len(i.byLetter))
+	for letter, bucket := range i.byLetter {
+		out[letter] = len(bucket)
+	}
+	return out
 }

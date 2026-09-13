@@ -240,7 +240,7 @@ func dedupe(named map[string]place) ([]place, int) {
 
 func writeCities(path string, list []place) error {
 	return writeLines(path, len(list), func(i int) string {
-		return list[i].display + "\t" + list[i].country
+		return list[i].display + "\t" + list[i].country + "\t" + strconv.Itoa(list[i].population)
 	})
 }
 

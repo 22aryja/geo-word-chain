@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/22aryja/geo-word-chain/internal/cities"
+	"github.com/22aryja/geo-word-chain/internal/game"
 )
 
 var _ Store = (*Memory)(nil)
@@ -28,7 +29,7 @@ func TestLifecycle(t *testing.T) {
 		t.Error("Stop must report false when nothing was running")
 	}
 
-	started := s.Start(1)
+	started := s.Start(1, game.AI)
 	got, ok := s.Get(1)
 	if !ok || got != started {
 		t.Fatal("Get must return the game Start created")
@@ -44,7 +45,7 @@ func TestLifecycle(t *testing.T) {
 func TestChatsAreIsolated(t *testing.T) {
 	s := store(t)
 
-	a, b := s.Start(1), s.Start(2)
+	a, b := s.Start(1, game.AI), s.Start(2, game.AI)
 	if a == b {
 		t.Fatal("two chats got the same game")
 	}
@@ -54,7 +55,7 @@ func TestChatsAreIsolated(t *testing.T) {
 		t.Error("a move in chat 1 changed chat 2")
 	}
 
-	s.Start(1)
+	s.Start(1, game.AI)
 	if _, ok := s.Get(2); !ok {
 		t.Error("chat 2 lost its game")
 	}
@@ -68,7 +69,7 @@ func TestConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func(chatID int64) {
 			defer wg.Done()
-			s.Start(chatID)
+			s.Start(chatID, game.AI)
 			if g, ok := s.Get(chatID); ok {
 				g.Play("Москва")
 			}

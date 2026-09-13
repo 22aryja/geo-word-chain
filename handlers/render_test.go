@@ -41,3 +41,37 @@ func TestRenderBotLost(t *testing.T) {
 	}
 	t.Logf("bot lost:\n%s", got)
 }
+
+func TestDifficultyKeyboard(t *testing.T) {
+	kb := difficultyKeyboard()
+	if len(kb.InlineKeyboard) != 5 {
+		t.Fatalf("got %d rows, want 5", len(kb.InlineKeyboard))
+	}
+	seen := map[string]bool{}
+	for _, row := range kb.InlineKeyboard {
+		if len(row) != 1 {
+			t.Fatalf("row has %d buttons, want 1", len(row))
+		}
+		btn := row[0]
+		if !strings.HasPrefix(btn.CallbackData, difficultyPrefix) {
+			t.Errorf("CallbackData %q missing prefix", btn.CallbackData)
+		}
+		key := strings.TrimPrefix(btn.CallbackData, difficultyPrefix)
+		if _, ok := game.ParseDifficulty(key); !ok {
+			t.Errorf("CallbackData %q does not parse back to a difficulty", btn.CallbackData)
+		}
+		if seen[btn.CallbackData] {
+			t.Errorf("duplicate CallbackData %q", btn.CallbackData)
+		}
+		seen[btn.CallbackData] = true
+		t.Logf("%-22s -> %s", btn.Text, btn.CallbackData)
+	}
+}
+
+func TestCallbackDataFitsTelegramLimit(t *testing.T) {
+	for _, d := range game.Difficulties() {
+		if n := len(difficultyPrefix + d.Key()); n > 64 {
+			t.Errorf("%s: callback data is %d bytes, Telegram allows 64", d.Key(), n)
+		}
+	}
+}

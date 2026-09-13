@@ -9,7 +9,7 @@ import (
 
 type Store interface {
 	Get(chatID int64) (*game.Game, bool)
-	Start(chatID int64) *game.Game
+	Start(chatID int64, difficulty game.Difficulty) *game.Game
 	Stop(chatID int64) bool
 }
 
@@ -35,8 +35,8 @@ func (m *Memory) Get(chatID int64) (*game.Game, bool) {
 	return g, ok
 }
 
-func (m *Memory) Start(chatID int64) *game.Game {
-	g := game.New(m.index)
+func (m *Memory) Start(chatID int64, difficulty game.Difficulty) *game.Game {
+	g := game.New(m.index, difficulty)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -29,8 +29,8 @@ func New(store storage.Store) *Handler {
 func (h *Handler) Register(b *bot.Bot) {
 
 	for pattern, handler := range map[string]bot.HandlerFunc{
-		"/start": h.Play,
-		"/play":  h.Play,
+		"/start": h.AskDifficulty,
+		"/play":  h.AskDifficulty,
 		"/score": h.Score,
 		"/stop":  h.Stop,
 		"/help":  h.Help,
@@ -39,21 +39,15 @@ func (h *Handler) Register(b *bot.Bot) {
 	}
 
 	for label, handler := range map[string]bot.HandlerFunc{
-		btnPlay:  h.Play,
+		btnPlay:  h.AskDifficulty,
 		btnScore: h.Score,
 		btnRules: h.Help,
 		btnStop:  h.Stop,
 	} {
 		b.RegisterHandler(bot.HandlerTypeMessageText, label, bot.MatchTypeExact, handler)
 	}
-}
 
-func (h *Handler) Play(ctx context.Context, b *bot.Bot, update *models.Update) {
-	if update.Message == nil {
-		return
-	}
-	h.store.Start(update.Message.Chat.ID)
-	h.send(ctx, b, update.Message.Chat.ID, helpText+"\nТвой ход — назови любой город.")
+	b.RegisterHandler(bot.HandlerTypeCallbackQueryData, difficultyPrefix, bot.MatchTypePrefix, h.ChooseDifficulty)
 }
 
 func (h *Handler) Stop(ctx context.Context, b *bot.Bot, update *models.Update) {
