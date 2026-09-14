@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"syscall"
 
 	"github.com/22aryja/geo-word-chain/config"
 	"github.com/22aryja/geo-word-chain/handlers"
@@ -14,7 +15,7 @@ import (
 )
 
 func main() {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	token := config.Config("TELEGRAM_API_TOKEN")
