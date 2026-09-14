@@ -130,3 +130,22 @@ func TestPlayIgnoresSeparators(t *testing.T) {
 		t.Errorf("Result = %v, want already used: same city, different spelling", m.Result)
 	}
 }
+
+func TestAliasUsesTypedLettersButSharesUsed(t *testing.T) {
+	idx := index(t)
+
+	g := New(idx, AI)
+	g.letter = "х"
+	m := g.Play("халеб")
+	if m.Result != Accepted {
+		t.Fatalf("Result = %v, want accepted", m.Result)
+	}
+	if got := cities.FirstLetter(m.BotCity.Name); got != "б" {
+		t.Errorf("bot answered on %q; typed «халеб» must hand over «б»", got)
+	}
+
+	g.letter = "а"
+	if m := g.Play("Алеппо"); m.Result != AlreadyUsed {
+		t.Errorf("Result = %v; Алеппо is the same city as Халеб", m.Result)
+	}
+}

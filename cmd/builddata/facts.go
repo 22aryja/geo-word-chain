@@ -26,6 +26,9 @@ const (
 type summary struct {
 	Type    string `json:"type"`
 	Extract string `json:"extract"`
+	Titles  struct {
+		Normalized string `json:"normalized"`
+	} `json:"titles"`
 }
 
 func wikiTitle(link string) string {
@@ -110,7 +113,7 @@ func (s *stats) report() {
 	}
 }
 
-func fetchSummary(client *http.Client, lang, title string, tally *stats) string {
+func fetchSummary(client *http.Client, lang, title string, tally *stats) (string, string) {
 	endpoint := fmt.Sprintf("https://%s.wikipedia.org/api/rest_v1/page/summary/%s",
 		lang, url.PathEscape(title))
 
@@ -119,7 +122,7 @@ func fetchSummary(client *http.Client, lang, title string, tally *stats) string 
 		req, err := http.NewRequest(http.MethodGet, endpoint, nil)
 		if err != nil {
 			tally.record("bad request", title)
-			return ""
+			return "", ""
 		}
 		req.Header.Set("User-Agent", userAgent)
 		req.Header.Set("Accept", "application/json")
@@ -128,7 +131,7 @@ func fetchSummary(client *http.Client, lang, title string, tally *stats) string 
 		if err != nil {
 			if attempt == maxAttempts {
 				tally.record("network", title+": "+err.Error())
-				return ""
+				return "", ""
 			}
 			time.Sleep(backoff)
 			backoff *= 2
@@ -145,7 +148,7 @@ func fetchSummary(client *http.Client, lang, title string, tally *stats) string 
 			resp.Body.Close()
 			if attempt == maxAttempts {
 				tally.record("throttled "+strconv.Itoa(resp.StatusCode), title)
-				return ""
+				return "", ""
 			}
 			time.Sleep(wait)
 			backoff *= 2
@@ -155,7 +158,7 @@ func fetchSummary(client *http.Client, lang, title string, tally *stats) string 
 		if resp.StatusCode != http.StatusOK {
 			resp.Body.Close()
 			tally.record("http "+strconv.Itoa(resp.StatusCode), title)
-			return ""
+			return "", ""
 		}
 
 		var out summary
@@ -163,32 +166,33 @@ func fetchSummary(client *http.Client, lang, title string, tally *stats) string 
 		resp.Body.Close()
 		if err != nil {
 			tally.record("bad json", title)
-			return ""
+			return "", ""
 		}
 		if out.Type == "disambiguation" {
 			tally.record("disambiguation", title)
-			return ""
+			return "", ""
 		}
 
 		if !looksLikePlace(out.Extract) {
 			tally.record("not a place", title)
-			return ""
+			return "", ""
 		}
 
 		fact := trimSentences(out.Extract, factSentences)
 		if fact == "" {
 			tally.record("empty extract", title)
-			return ""
+			return "", ""
 		}
 		tally.record("ok", "")
-		return fact
+		return fact, out.Titles.Normalized
 	}
-	return ""
+	return "", ""
 }
 
 type factJob struct {
-	display string
-	text    string
+	id    string
+	query string
+	entry wikiEntry
 }
 
 func factCandidates(list []place, notable map[string]bool, limit int) []place {
@@ -210,7 +214,7 @@ func factCandidates(list []place, notable map[string]bool, limit int) []place {
 	return out
 }
 
-func fetchFacts(list []place, links map[string]string, notable map[string]bool, lang string, limit int) map[string]string {
+func fetchFacts(list []place, links map[string]string, notable map[string]bool, lang string, limit int) map[string]wikiEntry {
 	candidates := factCandidates(list, notable, limit)
 	fmt.Printf("fetching Wikipedia summaries for the %d most populous notable cities\n", len(candidates))
 
@@ -226,8 +230,10 @@ func fetchFacts(list []place, links map[string]string, notable map[string]bool, 
 		go func() {
 			defer wg.Done()
 			for job := range jobs {
-				if fact := fetchSummary(client, lang, job.text, tally); fact != "" {
-					results <- factJob{display: job.display, text: fact}
+				fact, title := fetchSummary(client, lang, job.query, tally)
+				if fact != "" {
+					job.entry = wikiEntry{title: title, fact: fact}
+					results <- job
 				}
 				time.Sleep(fetchDelay)
 			}
@@ -236,40 +242,41 @@ func fetchFacts(list []place, links map[string]string, notable map[string]bool, 
 
 	go func() {
 		for _, p := range candidates {
-			title := wikiTitle(links[p.id])
-			if title == "" {
-				title = p.display
+			query := wikiTitle(links[p.id])
+			if query == "" {
+				query = p.display
 			}
-			jobs <- factJob{display: p.display, text: title}
+			jobs <- factJob{id: p.id, query: query}
 		}
 		close(jobs)
 		wg.Wait()
 		close(results)
 	}()
 
-	facts := make(map[string]string)
+	fetched := make(map[string]wikiEntry)
 	for r := range results {
-		facts[r.display] = r.text
-		if len(facts)%500 == 0 {
-			fmt.Printf("  %d facts so far\n", len(facts))
+		fetched[r.id] = r.entry
+		if len(fetched)%500 == 0 {
+			fmt.Printf("  %d facts so far\n", len(fetched))
 		}
 	}
 
 	fmt.Println("fetch outcomes:")
 	tally.report()
-	return facts
+	return fetched
 }
 
-func writeFacts(path string, facts map[string]string, list []place) error {
-	ordered := make([]string, 0, len(facts))
+func writeFacts(path string, list []place, cache map[string]wikiEntry) (int, error) {
+	ordered := make([]place, 0, len(list))
 	for _, p := range list {
-		if _, ok := facts[p.display]; ok {
-			ordered = append(ordered, p.display)
+		if cache[p.id].fact != "" {
+			ordered = append(ordered, p)
 		}
 	}
-	return writeLines(path, len(ordered), func(i int) string {
-		return ordered[i] + "\t" + facts[ordered[i]]
+	err := writeLines(path, len(ordered), func(i int) string {
+		return ordered[i].display + "\t" + cache[ordered[i].id].fact
 	})
+	return len(ordered), err
 }
 
 var placeWords = []string{

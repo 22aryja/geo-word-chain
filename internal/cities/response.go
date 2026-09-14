@@ -41,9 +41,15 @@ func (c City) Flag() string {
 	return sb.String()
 }
 
+type alias struct {
+	key  string
+	name string
+}
+
 type Index struct {
 	all       map[string]City
 	compact   map[string]string
+	aliases   map[string]alias
 	byLetter  map[string][]string
 	countries map[string]string
 }
@@ -56,9 +62,12 @@ func New() (*Index, error) {
 	index := &Index{
 		all:       make(map[string]City, len(lines)),
 		compact:   make(map[string]string, len(lines)),
+		aliases:   make(map[string]alias),
 		byLetter:  make(map[string][]string),
 		countries: countries,
 	}
+
+	var pending []alias
 
 	for _, line := range lines {
 		fields := strings.Split(strings.TrimSpace(line), "\t")
@@ -98,6 +107,16 @@ func New() (*Index, error) {
 				index.compact[c] = key
 			}
 		}
+
+		if len(fields) > 3 {
+			if name := strings.TrimSpace(fields[3]); name != "" {
+				pending = append(pending, alias{key: key, name: name})
+			}
+		}
+	}
+
+	for _, a := range pending {
+		index.addAlias(a)
 	}
 
 	index.sortByFame()
@@ -122,26 +141,67 @@ func parseCountries(raw string) map[string]string {
 	return out
 }
 
-func (i *Index) Lookup(word string) (city City, ok bool) {
-	key := Normalize(word)
+func (i *Index) addAlias(a alias) {
+	aliasKey := Normalize(a.name)
+	if aliasKey == "" || FirstLetter(aliasKey) == "" {
+		return
+	}
+	for _, k := range []string{aliasKey, Compact(aliasKey)} {
+		if _, canonical := i.all[k]; canonical {
+			continue
+		}
+		if _, canonical := i.compact[k]; canonical {
+			continue
+		}
+		if _, taken := i.aliases[k]; taken {
+			continue
+		}
+		i.aliases[k] = a
+	}
+}
+
+func (i *Index) resolve(word string) (key, spelled string) {
+	k := Normalize(word)
+	if k == "" {
+		return "", ""
+	}
+	if c, ok := i.all[k]; ok {
+		return k, c.Name
+	}
+	if a, ok := i.aliases[k]; ok {
+		return a.key, a.name
+	}
+	compact := Compact(k)
+	if canonical, ok := i.compact[compact]; ok {
+		return canonical, i.all[canonical].Name
+	}
+	if a, ok := i.aliases[compact]; ok {
+		return a.key, a.name
+	}
+	return "", ""
+}
+
+func (i *Index) Lookup(word string) (City, bool) {
+	key, spelled := i.resolve(word)
 	if key == "" {
 		return City{}, false
 	}
-	if city, ok = i.all[key]; ok {
-		return city, true
-	}
-	if normalized, found := i.compact[Compact(key)]; found {
-		return i.all[normalized], true
-	}
-	return City{}, false
+	city := i.all[key]
+	city.Name = spelled
+	return city, true
 }
 
 func (i *Index) Normalized(word string) string {
-	key := Normalize(word)
-	if _, ok := i.all[key]; ok {
-		return key
+	key, _ := i.resolve(word)
+	return key
+}
+
+func (i *Index) Aliases() int {
+	seen := make(map[alias]bool)
+	for _, a := range i.aliases {
+		seen[a] = true
 	}
-	return i.compact[Compact(key)]
+	return len(seen)
 }
 
 func (i *Index) ByLetter(letter string) []string {

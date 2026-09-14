@@ -47,7 +47,8 @@ func (g *Game) Play(input string) Move {
 	}
 
 	name := g.index.Normalized(input)
-	if g.letter != "" && cities.FirstLetter(name) != g.letter {
+	spelled := cities.Normalize(display.Name)
+	if g.letter != "" && cities.FirstLetter(spelled) != g.letter {
 		return Move{Result: WrongLetter, PlayerCity: display, NextLetter: g.letter}
 	}
 	if g.used[name] {
@@ -58,7 +59,7 @@ func (g *Game) Play(input string) Move {
 	g.score++
 	g.moves++
 
-	answer := g.pick(cities.LastLetter(name))
+	answer := g.pick(cities.LastLetter(spelled))
 	if answer == "" {
 		return Move{Result: BotLost, PlayerCity: display}
 	}

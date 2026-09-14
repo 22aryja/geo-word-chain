@@ -37,6 +37,8 @@ type place struct {
 	display    string
 	country    string
 	population int
+	alias      string
+	wiki       bool
 }
 
 type meta struct {
@@ -56,6 +58,7 @@ func main() {
 		histogram   = flag.Bool("histogram", true, "report cities per starting/ending letter")
 		facts       = flag.Bool("facts", false, "fetch Wikipedia summaries for cities that have an article")
 		factsLimit  = flag.Int("facts-limit", 5000, "how many of the most populous cities get a summary")
+		wikiCache   = flag.String("wiki-cache", "", "Wikipedia titles and summaries kept between runs (default cmd/builddata/wiki_<lang>.tsv)")
 	)
 	flag.Parse()
 
@@ -65,13 +68,13 @@ func main() {
 		os.Exit(2)
 	}
 
-	if err := run(*altPath, *cityPath, *countryPath, *outDir, *lang, *country, *minPop, *histogram, *facts, *factsLimit); err != nil {
+	if err := run(*altPath, *cityPath, *countryPath, *outDir, *lang, *country, *minPop, *histogram, *facts, *factsLimit, *wikiCache); err != nil {
 		fmt.Fprintln(os.Stderr, "builddata:", err)
 		os.Exit(1)
 	}
 }
 
-func run(altPath, cityPath, countryPath, outDir, lang, country string, minPop int, histogram, facts bool, factsLimit int) error {
+func run(altPath, cityPath, countryPath, outDir, lang, country string, minPop int, histogram, facts bool, factsLimit int, wikiCache string) error {
 
 	wantedCities, err := readCities(cityPath, country, minPop)
 	if err != nil {
@@ -95,11 +98,43 @@ func run(altPath, cityPath, countryPath, outDir, lang, country string, minPop in
 	list, dropped := dedupe(named)
 	fmt.Printf("after dedupe by normalized form: %d unique cities (%d duplicates collapsed)\n", len(list), dropped)
 
+	if wikiCache == "" {
+		wikiCache = filepath.Join("cmd", "builddata", "wiki_"+lang+".tsv")
+	}
+	cache, err := loadWikiCache(wikiCache)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("wiki cache: %d entries in %s\n", len(cache), wikiCache)
+
+	if facts {
+		for id, entry := range fetchFacts(list, links, notable, lang, factsLimit) {
+			cache[id] = entry
+		}
+		if err := saveWikiCache(wikiCache, cache); err != nil {
+			return err
+		}
+		fmt.Printf("wrote %s (%d entries)\n", wikiCache, len(cache))
+	}
+
+	overrides, err := loadOverrides(filepath.Join("cmd", "builddata", "overrides_"+lang+".tsv"))
+	if err != nil {
+		return err
+	}
+	fmt.Printf("overrides: %d cities with a fixed name\n", len(overrides))
+
+	renamedList, renames := applyWiki(list, cache, countryNames, overrides)
+	list, collapsed := resolve(renamedList)
+	reportRenames(renames)
+	titled, aliased := countWiki(list)
+	fmt.Printf("wikipedia titles: %d cities named by their article, %d with a second accepted name, %d collapsed\n",
+		titled, aliased, collapsed)
+
 	cityFile := filepath.Join(outDir, "cities_"+lang+".txt")
 	if err := writeCities(cityFile, list); err != nil {
 		return err
 	}
-	fmt.Printf("wrote %s\n", cityFile)
+	fmt.Printf("wrote %s (%d cities)\n", cityFile, len(list))
 
 	countryFile := filepath.Join(outDir, "countries_"+lang+".txt")
 	if err := writeCountries(countryFile, countryNames); err != nil {
@@ -107,14 +142,12 @@ func run(altPath, cityPath, countryPath, outDir, lang, country string, minPop in
 	}
 	fmt.Printf("wrote %s\n", countryFile)
 
-	if facts {
-		fetched := fetchFacts(list, links, notable, lang, factsLimit)
-		factFile := filepath.Join(outDir, "facts_"+lang+".txt")
-		if err := writeFacts(factFile, fetched, list); err != nil {
-			return err
-		}
-		fmt.Printf("wrote %s (%d facts)\n", factFile, len(fetched))
+	factFile := filepath.Join(outDir, "facts_"+lang+".txt")
+	written, err := writeFacts(factFile, list, cache)
+	if err != nil {
+		return err
 	}
+	fmt.Printf("wrote %s (%d facts)\n", factFile, written)
 
 	if missing := missingCountries(list, countryNames); len(missing) > 0 {
 		fmt.Printf("\nwarning: %d country codes have no %q name: %v\n", len(missing), lang, missing)
@@ -266,7 +299,11 @@ func dedupe(named map[string]place) ([]place, int) {
 
 func writeCities(path string, list []place) error {
 	return writeLines(path, len(list), func(i int) string {
-		return list[i].display + "\t" + list[i].country + "\t" + strconv.Itoa(list[i].population)
+		line := list[i].display + "\t" + list[i].country + "\t" + strconv.Itoa(list[i].population)
+		if list[i].alias != "" {
+			line += "\t" + list[i].alias
+		}
+		return line
 	})
 }
 
@@ -363,6 +400,9 @@ func open(path string) (*os.File, *bufio.Scanner, error) {
 }
 
 func better(a, b place) bool {
+	if a.wiki != b.wiki {
+		return a.wiki
+	}
 	if a.population != b.population {
 		return a.population > b.population
 	}
